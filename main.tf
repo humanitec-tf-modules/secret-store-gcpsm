@@ -25,6 +25,22 @@ resource "random_string" "secret_manager_role_suffix" {
   special = false
 }
 
+# Configuration of the google provider, for its project as the fallback of the project ID variables.
+# It is read unconditionally: a count depending on whether the project ID variables are set could not be
+# planned if they are only known after apply.
+data "google_client_config" "current" {
+  lifecycle {
+    postcondition {
+      condition     = var.secret_manager_project_id != null || try(coalesce(self.project), null) != null
+      error_message = "secret_manager_project_id must be set if no project is configured in the google provider"
+    }
+    postcondition {
+      condition     = !local.gke_project_id_required || var.gke_project_id != null || try(coalesce(self.project), null) != null
+      error_message = "gke_project_id must be set if auth_method is workload_identity and no project is configured in the google provider, unless the Operator impersonates a Google service account and workload_identity_binding_create is false"
+    }
+  }
+}
+
 locals {
   use_workload_identity   = var.auth_method == "workload_identity"
   use_service_account_key = var.auth_method == "service_account_key"
@@ -112,9 +128,20 @@ locals {
   service_account_id        = one(concat(google_service_account.operator[*].name, data.google_service_account.operator[*].name))
   service_account_unique_id = one(concat(google_service_account.operator[*].unique_id, data.google_service_account.operator[*].unique_id))
 
+  # Project of the google provider, or null if none is configured. The provider reports an unset project
+  # as an empty string, which coalesce() skips, and try() turns the error of coalesce() without a value into null.
+  provider_project_id = try(coalesce(data.google_client_config.current.project), null)
+  # Project IDs passed in, falling back to the project of the google provider
+  secret_manager_project_id = try(coalesce(var.secret_manager_project_id, local.provider_project_id), null)
+  # The GKE project is only used with Workload Identity, so it only falls back to the provider project then.
+  # It is required unless the Operator impersonates a Google service account whose Workload Identity binding is
+  # managed outside of the module: then it only serves the workload_identity_member output.
+  gke_project_id_required = local.use_workload_identity && (!local.use_service_account || var.workload_identity_binding_create)
+  gke_project_id          = local.use_workload_identity ? try(coalesce(var.gke_project_id, local.provider_project_id), null) : null
+
   # Workload Identity pool of the GKE cluster, and the Operator service account in it.
   # https://cloud.google.com/kubernetes-engine/docs/how-to/workload-identity
-  workload_identity_pool = var.gke_project_id != null ? "${var.gke_project_id}.svc.id.goog" : null
+  workload_identity_pool = local.gke_project_id != null ? "${local.gke_project_id}.svc.id.goog" : null
   # Principal of the Operator service account for granting it IAM roles directly (Workload Identity Federation for GKE)
   workload_identity_principal = (
     local.use_workload_identity_federation
@@ -123,7 +150,7 @@ locals {
   )
   # Member of the Operator service account for allowing it to impersonate a Google service account
   workload_identity_member = (
-    local.use_workload_identity_service_account && var.gke_project_id != null
+    local.use_workload_identity_service_account && local.gke_project_id != null
     ? "serviceAccount:${local.workload_identity_pool}[${var.operator_namespace}/${var.operator_serviceaccount}]"
     : null
   )
@@ -166,7 +193,7 @@ locals {
   # The location is omitted for the global Secret Manager
   secret_store_spec = merge(
     {
-      projectID = var.secret_manager_project_id
+      projectID = local.secret_manager_project_id
       auth      = local.secret_store_auth
     },
     var.secret_manager_location != null ? { locationID = var.secret_manager_location } : {},
@@ -182,7 +209,7 @@ locals {
 # Project of the GKE cluster, for the project number in the principal of the Operator service account
 data "google_project" "gke" {
   count      = local.use_workload_identity_federation ? 1 : 0
-  project_id = var.gke_project_id
+  project_id = local.gke_project_id
 }
 
 # Google service account for the Operator
@@ -190,7 +217,7 @@ data "google_project" "gke" {
 
 resource "google_service_account" "operator" {
   count        = local.service_account_create ? 1 : 0
-  project      = coalesce(var.service_account_project_id, var.secret_manager_project_id)
+  project      = coalesce(var.service_account_project_id, local.secret_manager_project_id)
   account_id   = coalesce(var.service_account_name, local.service_account_generated_name)
   display_name = coalesce(var.service_account_display_name, "Humanitec Operator ${local.secret_store_id}")
   description  = "Humanitec Operator access to the Google Cloud Secret Manager secret store ${local.secret_store_id}"
@@ -255,7 +282,7 @@ resource "kubernetes_secret_v1" "operator_credentials" {
 # Least-privilege custom role for read/write access to the default store
 resource "google_project_iam_custom_role" "secret_manager" {
   count       = local.secret_manager_role_create ? 1 : 0
-  project     = var.secret_manager_project_id
+  project     = local.secret_manager_project_id
   role_id     = local.secret_manager_role_id
   title       = "Humanitec Operator ${local.secret_store_id}"
   description = "Humanitec Operator read/write access to the Google Cloud Secret Manager secret store ${local.secret_store_id}"
@@ -264,7 +291,7 @@ resource "google_project_iam_custom_role" "secret_manager" {
 
 resource "google_project_iam_member" "operator" {
   count   = var.secret_manager_access_create ? 1 : 0
-  project = var.secret_manager_project_id
+  project = local.secret_manager_project_id
   role    = local.secret_manager_role
   member  = local.operator_iam_member
 }

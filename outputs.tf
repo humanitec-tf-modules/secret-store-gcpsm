@@ -7,8 +7,8 @@ output "secret_store_namespace" {
   value       = kubernetes_manifest.secret_store.manifest.metadata.namespace
 }
 output "secret_manager_project_id" {
-  description = "ID of the Google Cloud project of the Secret Manager, used as the `projectID` of the secret store."
-  value       = var.secret_manager_project_id
+  description = "ID of the Google Cloud project of the Secret Manager, used as the `projectID` of the secret store. This is either `secret_manager_project_id` or the project configured in the `google` provider."
+  value       = local.secret_manager_project_id
 }
 output "secret_manager_location" {
   description = "Location of the regional Secret Manager, used as the `locationID` of the secret store. Returns `null` for the global Secret Manager."
@@ -47,7 +47,7 @@ output "service_account_unique_id" {
   value       = local.service_account_unique_id
 }
 output "workload_identity_member" {
-  description = "IAM member of the Operator service account in the Workload Identity pool of the GKE cluster, i.e. `serviceAccount:<gke_project_id>.svc.id.goog[<operator_namespace>/<operator_serviceaccount>]`. If `workload_identity_binding_create` is `false`, grant it the role `roles/iam.workloadIdentityUser` on the Google service account yourself. Returns `null` if `auth_method` is not `workload_identity`, the Operator does not impersonate a Google service account, or `gke_project_id` is not set."
+  description = "IAM member of the Operator service account in the Workload Identity pool of the GKE cluster, i.e. `serviceAccount:<gke_project_id>.svc.id.goog[<operator_namespace>/<operator_serviceaccount>]`, with `gke_project_id` falling back to the project configured in the `google` provider. If `workload_identity_binding_create` is `false`, grant it the role `roles/iam.workloadIdentityUser` on the Google service account yourself. Returns `null` if `auth_method` is not `workload_identity`, the Operator does not impersonate a Google service account, or neither `gke_project_id` nor a provider project is set."
   value       = local.workload_identity_member
 }
 output "workload_identity_binding_id" {

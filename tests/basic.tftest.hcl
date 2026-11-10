@@ -9,6 +9,12 @@ mock_provider "random" {
   }
 }
 mock_provider "google" {
+  # Project configured in the provider, the fallback of secret_manager_project_id and gke_project_id
+  mock_data "google_client_config" {
+    defaults = {
+      project = "my-provider-project"
+    }
+  }
   mock_data "google_project" {
     defaults = {
       number = "123456789012"
@@ -665,11 +671,104 @@ run "shared_service_account_without_bindings" {
   }
   assert {
     condition = (
-      output.workload_identity_member == null &&
+      output.workload_identity_member == "serviceAccount:my-provider-project.svc.id.goog[humanitec-operator-system/humanitec-operator-controller-manager]" &&
       output.workload_identity_binding_id == null &&
       output.secret_manager_iam_member_id == null
     )
-    error_message = "Workload Identity member output should be null without gke_project_id, and binding ID outputs should be null"
+    error_message = "Workload Identity member output should fall back to the provider project without gke_project_id, and binding ID outputs should be null"
+  }
+}
+
+run "shared_service_account_without_bindings_or_any_gke_project" {
+  command = apply
+
+  variables {
+    secret_store_default             = false
+    gke_project_id                   = null
+    service_account_email            = "existing-sa@identity-project.iam.gserviceaccount.com"
+    workload_identity_binding_create = false
+    secret_manager_access_create     = false
+  }
+
+  override_data {
+    target = data.google_client_config.current
+    values = {
+      project = ""
+    }
+  }
+
+  assert {
+    condition     = output.workload_identity_member == null
+    error_message = "Workload Identity member output should be null if neither gke_project_id nor a provider project is set"
+  }
+}
+
+# Fallback of the project IDs to the project configured in the google provider
+
+run "project_ids_fall_back_to_provider_project" {
+  command = apply
+
+  variables {
+    secret_manager_project_id = null
+    gke_project_id            = null
+  }
+
+  assert {
+    condition = (
+      kubernetes_manifest.secret_store.manifest.spec.gcpsm.projectID == "my-provider-project" &&
+      output.secret_manager_project_id == "my-provider-project"
+    )
+    error_message = "Secret store should use the provider project if secret_manager_project_id is not set"
+  }
+  assert {
+    condition = (
+      google_project_iam_custom_role.secret_manager[0].project == "my-provider-project" &&
+      google_project_iam_member.operator[0].project == "my-provider-project"
+    )
+    error_message = "Custom role and IAM role binding should be in the provider project if secret_manager_project_id is not set"
+  }
+  assert {
+    condition = (
+      data.google_project.gke[0].project_id == "my-provider-project" &&
+      output.operator_iam_member == "principal://iam.googleapis.com/projects/123456789012/locations/global/workloadIdentityPools/my-provider-project.svc.id.goog/subject/ns/humanitec-operator-system/sa/humanitec-operator-controller-manager"
+    )
+    error_message = "Workload Identity pool should be the one of the provider project if gke_project_id is not set"
+  }
+}
+
+run "service_account_project_falls_back_to_provider_project" {
+  command = apply
+
+  variables {
+    secret_manager_project_id = null
+    service_account_create    = true
+  }
+
+  assert {
+    condition     = google_service_account.operator[0].project == "my-provider-project"
+    error_message = "Google service account should be created in the provider project if neither service_account_project_id nor secret_manager_project_id is set"
+  }
+  assert {
+    condition     = output.workload_identity_member == "serviceAccount:my-gke-project.svc.id.goog[humanitec-operator-system/humanitec-operator-controller-manager]"
+    error_message = "gke_project_id should take precedence over the provider project"
+  }
+}
+
+run "service_account_key_ignores_provider_project_for_gke" {
+  command = apply
+
+  variables {
+    auth_method    = "service_account_key"
+    gke_project_id = null
+  }
+
+  assert {
+    condition = (
+      length(data.google_project.gke) == 0 &&
+      output.workload_identity_member == null &&
+      kubernetes_manifest.secret_store.manifest.spec.gcpsm.projectID == "my-gsm-project"
+    )
+    error_message = "The provider project should not be used as the GKE project with a service account key, and secret_manager_project_id should take precedence over it"
   }
 }
 
@@ -1094,17 +1193,41 @@ run "existing_service_account_requires_email_with_workload_identity" {
   expect_failures = [var.service_account_email]
 }
 
-run "workload_identity_federation_requires_gke_project_id" {
+run "requires_secret_manager_project_id_without_provider_project" {
+  command = plan
+
+  variables {
+    secret_manager_project_id = null
+  }
+
+  override_data {
+    target = data.google_client_config.current
+    values = {
+      project = ""
+    }
+  }
+
+  expect_failures = [data.google_client_config.current]
+}
+
+run "workload_identity_federation_requires_gke_project_id_without_provider_project" {
   command = plan
 
   variables {
     gke_project_id = null
   }
 
-  expect_failures = [var.gke_project_id]
+  override_data {
+    target = data.google_client_config.current
+    values = {
+      project = ""
+    }
+  }
+
+  expect_failures = [data.google_client_config.current]
 }
 
-run "workload_identity_binding_requires_gke_project_id" {
+run "workload_identity_binding_requires_gke_project_id_without_provider_project" {
   command = plan
 
   variables {
@@ -1112,7 +1235,14 @@ run "workload_identity_binding_requires_gke_project_id" {
     service_account_email = "existing-sa@identity-project.iam.gserviceaccount.com"
   }
 
-  expect_failures = [var.gke_project_id]
+  override_data {
+    target = data.google_client_config.current
+    values = {
+      project = ""
+    }
+  }
+
+  expect_failures = [data.google_client_config.current]
 }
 
 run "rejects_invalid_gke_project_id" {

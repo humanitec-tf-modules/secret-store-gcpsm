@@ -43,12 +43,13 @@ variable "secret_store_default" {
 # Secret Manager
 
 variable "secret_manager_project_id" {
-  description = "ID of the Google Cloud project whose Secret Manager is used as the secret store, e.g. `my-gsm-project`. The Secret Manager API must be enabled in the project. This may be the project of the GKE cluster hosting the Operator, or a different one."
+  description = "ID of the Google Cloud project whose Secret Manager is used as the secret store, e.g. `my-gsm-project`. The Secret Manager API must be enabled in the project. This may be the project of the GKE cluster hosting the Operator, or a different one. If not set, the project configured in the `google` provider is used. Required if the provider has no project configured."
   type        = string
-  nullable    = false
+  nullable    = true
+  default     = null
 
   validation {
-    condition     = can(regex(local.project_id_pattern, var.secret_manager_project_id))
+    condition     = var.secret_manager_project_id == null || can(regex(local.project_id_pattern, var.secret_manager_project_id))
     error_message = "secret_manager_project_id must be a Google Cloud project ID, e.g. my-gsm-project"
   }
 }
@@ -64,7 +65,7 @@ variable "secret_manager_location" {
   }
 }
 variable "secret_manager_access_create" {
-  description = "Whether to grant the Operator identity access to the Secret Manager, via an IAM role binding on the `secret_manager_project_id` project. Set it to `false` if the identity already has access, e.g. if several secret stores share one identity and one Secret Manager project: the bindings are non-authoritative, so if several module instances manage the same binding, destroying one instance revokes the access of the others. Grant the access yourself in that case, using the `operator_iam_member` output and a role with the permissions of the `secret_manager_permissions` output. The module then creates no custom role for the default store either."
+  description = "Whether to grant the Operator identity access to the Secret Manager, via an IAM role binding on its project. Set it to `false` if the identity already has access, e.g. if several secret stores share one identity and one Secret Manager project: the bindings are non-authoritative, so if several module instances manage the same binding, destroying one instance revokes the access of the others. Grant the access yourself in that case, using the `operator_iam_member` output and a role with the permissions of the `secret_manager_permissions` output. The module then creates no custom role for the default store either."
   type        = bool
   nullable    = false
   default     = true
@@ -123,15 +124,10 @@ variable "auth_method" {
   }
 }
 variable "gke_project_id" {
-  description = "ID of the Google Cloud project of the GKE cluster hosting the Operator. Its Workload Identity pool `<gke_project_id>.svc.id.goog` identifies the Operator service account. The cluster and the node pool running the Operator must have Workload Identity Federation for GKE enabled. Required if `auth_method` is `workload_identity`, unless the Operator impersonates a Google service account and `workload_identity_binding_create` is `false`. Must not be set if `auth_method` is `service_account_key`."
+  description = "ID of the Google Cloud project of the GKE cluster hosting the Operator. Its Workload Identity pool `<gke_project_id>.svc.id.goog` identifies the Operator service account. The cluster and the node pool running the Operator must have Workload Identity Federation for GKE enabled. If not set and `auth_method` is `workload_identity`, the project configured in the `google` provider is used. Required if `auth_method` is `workload_identity` and the provider has no project configured, unless the Operator impersonates a Google service account and `workload_identity_binding_create` is `false`. Must not be set if `auth_method` is `service_account_key`."
   type        = string
   nullable    = true
   default     = null
-
-  validation {
-    condition     = !(local.use_workload_identity && (!local.use_service_account || var.workload_identity_binding_create)) || var.gke_project_id != null
-    error_message = "gke_project_id must be set if auth_method is workload_identity, unless the Operator impersonates a Google service account and workload_identity_binding_create is false"
-  }
 
   validation {
     condition     = var.auth_method != "service_account_key" || var.gke_project_id == null
@@ -185,7 +181,7 @@ variable "service_account_display_name" {
   }
 }
 variable "service_account_project_id" {
-  description = "ID of the Google Cloud project in which to create the Google service account for the Operator. If not set, the `secret_manager_project_id` is used. Only used if the module creates the service account."
+  description = "ID of the Google Cloud project in which to create the Google service account for the Operator. If not set, the project of the Secret Manager is used, i.e. `secret_manager_project_id` or its fallback. Only used if the module creates the service account."
   type        = string
   nullable    = true
   default     = null

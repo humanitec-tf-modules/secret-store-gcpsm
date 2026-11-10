@@ -4,6 +4,11 @@
 mock_provider "kubernetes" {}
 mock_provider "random" {}
 mock_provider "google" {
+  mock_data "google_client_config" {
+    defaults = {
+      project = "my-provider-project"
+    }
+  }
   mock_data "google_project" {
     defaults = {
       number = "123456789012"
