@@ -8,10 +8,6 @@
 
 No requirements.
 
-## Providers
-
-No providers.
-
 ## Modules
 
 No modules.

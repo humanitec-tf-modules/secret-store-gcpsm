@@ -7,9 +7,10 @@ on:
   issues:
     types: [opened]
   pull_request:
-    types: [opened, synchronize]
+    types: [opened, synchronize, ready_for_review]
 
 jobs:
   auto-assign:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     uses: humanitec-tf-modules/reusable-workflows/.github/workflows/auto-assign.yml@main
     secrets: inherit
