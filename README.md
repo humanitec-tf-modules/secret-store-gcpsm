@@ -468,7 +468,7 @@ The key must be the content of the JSON key file of the service account, not bas
 ## Requirements
 
 | Name | Version |
-| ---- | ------- |
+|------|---------|
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.11.0 |
 | <a name="requirement_google"></a> [google](#requirement\_google) | >= 7.0.0, < 9.0.0 |
 | <a name="requirement_kubernetes"></a> [kubernetes](#requirement\_kubernetes) | ~> 3 |
@@ -481,7 +481,7 @@ No modules.
 ## Resources
 
 | Name | Type |
-| ---- | ---- |
+|------|------|
 | [google_project_iam_custom_role.secret_manager](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/project_iam_custom_role) | resource |
 | [google_project_iam_member.operator](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/project_iam_member) | resource |
 | [google_service_account.operator](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/service_account) | resource |
@@ -502,7 +502,7 @@ No modules.
 ## Inputs
 
 | Name | Description | Type | Default | Required |
-| ---- | ----------- | ---- | ------- | :------: |
+|------|-------------|------|---------|:--------:|
 | <a name="input_auth_method"></a> [auth\_method](#input\_auth\_method) | How the Operator authenticates against Google Cloud Secret Manager. `workload_identity` (recommended): the Operator uses its Kubernetes service account via Workload Identity Federation for GKE, either directly or by impersonating a Google service account. `service_account_key`: the Operator uses a key of a Google service account, stored in a Kubernetes Secret. | `string` | `"workload_identity"` | no |
 | <a name="input_gke_project_id"></a> [gke\_project\_id](#input\_gke\_project\_id) | ID of the Google Cloud project of the GKE cluster hosting the Operator. Its Workload Identity pool `<gke_project_id>.svc.id.goog` identifies the Operator service account. The cluster and the node pool running the Operator must have Workload Identity Federation for GKE enabled. If not set and `auth_method` is `workload_identity`, the project configured in the `google` provider is used. Required if `auth_method` is `workload_identity` and the provider has no project configured, unless the Operator impersonates a Google service account and `workload_identity_binding_create` is `false`. Must not be set if `auth_method` is `service_account_key`. | `string` | `null` | no |
 | <a name="input_operator_namespace"></a> [operator\_namespace](#input\_operator\_namespace) | Name of the Kubernetes namespace of the Humanitec Operator. | `string` | `"humanitec-operator-system"` | no |
@@ -530,7 +530,7 @@ No modules.
 ## Outputs
 
 | Name | Description |
-| ---- | ----------- |
+|------|-------------|
 | <a name="output_operator_iam_member"></a> [operator\_iam\_member](#output\_operator\_iam\_member) | IAM member of the identity the Operator uses, e.g. to grant it access to further Google Cloud resources. This is `serviceAccount:<email>` if the Operator uses a Google service account, or the `principal://` identifier of the Operator service account if it uses Workload Identity Federation for GKE directly. |
 | <a name="output_operator_serviceaccount_annotations"></a> [operator\_serviceaccount\_annotations](#output\_operator\_serviceaccount\_annotations) | Annotations to set on the Operator service account so that it impersonates the Google service account via Workload Identity, e.g. via the `controllerManager.serviceAccount.annotations` value of the Operator Helm chart. Restart the Operator after changing them. Returns an empty map if `auth_method` is not `workload_identity` or the Operator does not impersonate a Google service account. |
 | <a name="output_secret_manager_custom_role_id"></a> [secret\_manager\_custom\_role\_id](#output\_secret\_manager\_custom\_role\_id) | ID of the least-privilege custom role created by the module for the default store, i.e. `projects/<project>/roles/<role_id>`. Returns `null` if the module does not create it. |
