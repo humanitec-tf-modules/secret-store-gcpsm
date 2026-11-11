@@ -1,10 +1,17 @@
 output "secret_store_id" {
   description = "ID of the secret store, i.e. the name of the Kubernetes `SecretStore` resource. This is either `secret_store_id` or the generated ID. Use it as the `store` in secret references."
-  value       = kubernetes_manifest.secret_store.manifest.metadata.name
+  value       = local.secret_store_id
+  # Consumers of the ID should wait for the SecretStore, once it can be created
+  depends_on = [kubernetes_manifest.secret_store]
 }
 output "secret_store_namespace" {
   description = "Name of the Kubernetes namespace of the `SecretStore` resource. This is the Operator namespace for a cluster-wide store, or the Environment namespace for an Environment-local store."
-  value       = kubernetes_manifest.secret_store.manifest.metadata.namespace
+  value       = local.secret_store_namespace
+  depends_on  = [kubernetes_manifest.secret_store]
+}
+output "secret_store_ready" {
+  description = "Whether the module manages the `SecretStore` resource. This is `false` if the `SecretStore` CRD was not present on the cluster during planning. In that case, apply the configuration again once the Operator is installed. See [Installation order](#installation-order)."
+  value       = local.secret_store_crd_ready
 }
 output "secret_manager_project_id" {
   description = "ID of the Google Cloud project of the Secret Manager, used as the `projectID` of the secret store. This is either `secret_manager_project_id` or the project configured in the `google` provider."

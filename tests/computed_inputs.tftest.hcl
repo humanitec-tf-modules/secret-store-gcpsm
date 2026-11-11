@@ -1,7 +1,14 @@
 # Inputs only known after apply must not prevent planning the module.
 # Terraform leaves computed attributes of mocked resources unknown during plan, so it reproduces this.
 # OpenTofu fills them with the mocked values already during plan, which are set here so that they pass validation.
-mock_provider "kubernetes" {}
+mock_provider "kubernetes" {
+  # The SecretStore CRD is present on the cluster
+  mock_data "kubernetes_resources" {
+    defaults = {
+      objects = [{ metadata = { name = "secretstores.humanitec.io" } }]
+    }
+  }
+}
 mock_provider "random" {}
 mock_provider "google" {
   mock_data "google_client_config" {

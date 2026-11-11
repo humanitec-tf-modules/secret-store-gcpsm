@@ -18,7 +18,7 @@ You can also bring your own Google service account and key instead of having the
 Prerequisites:
 
 - The Secret Manager API is [enabled](https://cloud.google.com/secret-manager/docs/configuring-secret-manager) in the Google Cloud project of the Secret Manager
-- The Humanitec Operator is installed on the cluster before you plan the module. See [Installation order](#installation-order)
+- The Humanitec Operator is installed on the cluster, either beforehand or in the same configuration as the module. See [Installation order](#installation-order)
 - If you use Workload Identity, [Workload Identity Federation for GKE](https://cloud.google.com/kubernetes-engine/docs/how-to/workload-identity) is enabled on the GKE cluster and on the node pool running the Operator
 - For an Environment-local secret store, the Environment namespace exists
 
@@ -26,14 +26,21 @@ The module requires a `google` provider that is allowed to manage IAM role bindi
 
 ## Installation order
 
-The module creates the `SecretStore` resource using a `kubernetes_manifest`, which reads the `SecretStore` custom resource definition (CRD) from the cluster during planning. The Humanitec Operator Helm chart installs this CRD. Therefore, the Operator must already be installed when you plan the module.
+The module creates the `SecretStore` resource using a `kubernetes_manifest`, which reads the `SecretStore` custom resource definition (CRD) from the cluster during planning. The Humanitec Operator installs this CRD.
 
-If you install the Operator in the same OpenTofu/Terraform configuration as the present module, e.g. via a `helm_release`, apply the Operator before you add the module, e.g. in a separate stage or using `-target`. Adding a `depends_on` on the module is not sufficient, as the CRD is required during planning already.
+So that you can install the Operator in the same OpenTofu/Terraform configuration as the module, the module checks for the CRD during planning. If the CRD is missing, the module skips the `SecretStore` and the Kubernetes Secret holding the service account key. It still creates the Google Cloud objects, shows the warning `SecretStore CRD not found`, and returns `false` in the `secret_store_ready` output.
+
+On a new cluster, this takes two consecutive applies without any configuration change in between:
+
+1. The first apply installs the Operator, and with it the CRD, and creates the Google Cloud objects. The warning is expected.
+2. The second apply finds the CRD and creates the `SecretStore`.
+
+If the Operator is already installed, a single apply is sufficient.
 
 > [!NOTE]
 > **Architectural decision**
 >
-> A provider such as [alekc/kubectl](https://registry.terraform.io/providers/alekc/kubectl), which does not require the CRD to exist at plan time, would allow a single apply. However, it would introduce another external community provider, require users to configure and pass in a further provider, and require an additional module input to order the SecretStore after the Operator installation. It would also need retry handling, as a newly installed CRD can take a moment before the API server accepts resources of its type. The module therefore accepts the two-pass limitation. It only applies when the Operator is installed in the same run as the module, e.g. on a new cluster.
+> A provider such as [alekc/kubectl](https://registry.terraform.io/providers/alekc/kubectl), which does not require the CRD to exist at plan time, would allow a single apply. However, it would introduce another external community provider, require users to configure and pass in a further provider, and require an additional module input to order the SecretStore after the Operator installation. It would also need retry handling, as a newly installed CRD can take a moment before the API server accepts resources of its type. The module therefore checks for the CRD instead and accepts a second apply when the Operator is installed in the same run as the module, e.g. on a new cluster.
 
 With the default Workload Identity setup, the Operator needs no further configuration. If the Operator impersonates a Google service account, its service account needs an annotation with the email address of the Google service account. See [Configure the Operator to impersonate the Google service account](#configure-the-operator-to-impersonate-the-google-service-account) for how to provide it.
 
@@ -302,9 +309,9 @@ Then [configure the Operator to impersonate the Google service account](#configu
 
 #### Configure the Operator to impersonate the Google service account
 
-The Operator service account must be annotated with the email address of the Google service account. The module does not modify the Operator installation, so you need to set it via the Helm values of the Operator.
+The Operator service account must be annotated with the email address of the Google service account. The module does not modify the Operator installation, so you need to set the annotation via the Helm values of the Operator.
 
-Use the `operator_serviceaccount_annotations` output of the module in the Helm values of the existing Operator installation:
+Use the `operator_serviceaccount_annotations` output of the module in the Helm values of the Operator installation. If you install the Operator in the same configuration as the module, the first apply then creates the Google service account before it installs the Operator with the annotation (see [Installation order](#installation-order)).
 
 ```hcl
 locals {
@@ -327,19 +334,19 @@ controllerManager:
       iam.gke.io/gcp-service-account: <email address of the Google service account>
 ```
 
-Then restart the Operator to pick up the Google service account:
+If you change the annotation of a running Operator, restart the Operator to pick up the Google service account:
 
 ```shell
 kubectl rollout restart deployment -n humanitec-operator-system humanitec-operator-controller-manager
 ```
 
-To set the Helm values when you first install the Operator instead, create the Google service account before the Operator and [bring your own Google service account](#bring-your-own-google-service-account).
+If you install the Operator separately and before the module, create the Google service account before the Operator and [bring your own Google service account](#bring-your-own-google-service-account), so that you know its email address at that point.
 
 #### Bring your own Google service account
 
 This configuration creates the default secret store, using your own Google service account. The module grants it access to the Secret Manager, and allows the Operator service account to impersonate it.
 
-Creating the Google service account yourself lets you set the annotation when you first install the Operator, before the module runs.
+Creating the Google service account yourself lets you set the annotation when you install the Operator separately and before the module.
 
 Set `service_account_create` to `false` to use the Google service account passed in via `service_account_email`. If you omit it, the module infers it from `service_account_email` being set, which only works for a literal email address: an email address only known after apply, as in this example, fails the plan with an `Invalid count argument` error.
 
@@ -461,7 +468,7 @@ The key must be the content of the JSON key file of the service account, not bas
 ## Requirements
 
 | Name | Version |
-|------|---------|
+| ---- | ------- |
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.11.0 |
 | <a name="requirement_google"></a> [google](#requirement\_google) | >= 7.0.0, < 9.0.0 |
 | <a name="requirement_kubernetes"></a> [kubernetes](#requirement\_kubernetes) | ~> 3 |
@@ -474,7 +481,7 @@ No modules.
 ## Resources
 
 | Name | Type |
-|------|------|
+| ---- | ---- |
 | [google_project_iam_custom_role.secret_manager](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/project_iam_custom_role) | resource |
 | [google_project_iam_member.operator](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/project_iam_member) | resource |
 | [google_service_account.operator](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/service_account) | resource |
@@ -490,11 +497,12 @@ No modules.
 | [google_client_config.current](https://registry.terraform.io/providers/hashicorp/google/latest/docs/data-sources/client_config) | data source |
 | [google_project.gke](https://registry.terraform.io/providers/hashicorp/google/latest/docs/data-sources/project) | data source |
 | [google_service_account.operator](https://registry.terraform.io/providers/hashicorp/google/latest/docs/data-sources/service_account) | data source |
+| [kubernetes_resources.secret_store_crd](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/data-sources/resources) | data source |
 
 ## Inputs
 
 | Name | Description | Type | Default | Required |
-|------|-------------|------|---------|:--------:|
+| ---- | ----------- | ---- | ------- | :------: |
 | <a name="input_auth_method"></a> [auth\_method](#input\_auth\_method) | How the Operator authenticates against Google Cloud Secret Manager. `workload_identity` (recommended): the Operator uses its Kubernetes service account via Workload Identity Federation for GKE, either directly or by impersonating a Google service account. `service_account_key`: the Operator uses a key of a Google service account, stored in a Kubernetes Secret. | `string` | `"workload_identity"` | no |
 | <a name="input_gke_project_id"></a> [gke\_project\_id](#input\_gke\_project\_id) | ID of the Google Cloud project of the GKE cluster hosting the Operator. Its Workload Identity pool `<gke_project_id>.svc.id.goog` identifies the Operator service account. The cluster and the node pool running the Operator must have Workload Identity Federation for GKE enabled. If not set and `auth_method` is `workload_identity`, the project configured in the `google` provider is used. Required if `auth_method` is `workload_identity` and the provider has no project configured, unless the Operator impersonates a Google service account and `workload_identity_binding_create` is `false`. Must not be set if `auth_method` is `service_account_key`. | `string` | `null` | no |
 | <a name="input_operator_namespace"></a> [operator\_namespace](#input\_operator\_namespace) | Name of the Kubernetes namespace of the Humanitec Operator. | `string` | `"humanitec-operator-system"` | no |
@@ -522,7 +530,7 @@ No modules.
 ## Outputs
 
 | Name | Description |
-|------|-------------|
+| ---- | ----------- |
 | <a name="output_operator_iam_member"></a> [operator\_iam\_member](#output\_operator\_iam\_member) | IAM member of the identity the Operator uses, e.g. to grant it access to further Google Cloud resources. This is `serviceAccount:<email>` if the Operator uses a Google service account, or the `principal://` identifier of the Operator service account if it uses Workload Identity Federation for GKE directly. |
 | <a name="output_operator_serviceaccount_annotations"></a> [operator\_serviceaccount\_annotations](#output\_operator\_serviceaccount\_annotations) | Annotations to set on the Operator service account so that it impersonates the Google service account via Workload Identity, e.g. via the `controllerManager.serviceAccount.annotations` value of the Operator Helm chart. Restart the Operator after changing them. Returns an empty map if `auth_method` is not `workload_identity` or the Operator does not impersonate a Google service account. |
 | <a name="output_secret_manager_custom_role_id"></a> [secret\_manager\_custom\_role\_id](#output\_secret\_manager\_custom\_role\_id) | ID of the least-privilege custom role created by the module for the default store, i.e. `projects/<project>/roles/<role_id>`. Returns `null` if the module does not create it. |
@@ -533,6 +541,7 @@ No modules.
 | <a name="output_secret_manager_role"></a> [secret\_manager\_role](#output\_secret\_manager\_role) | IAM role granted to the Operator identity on the Secret Manager project: `secret_manager_role` if set, otherwise the name of the least-privilege custom role created by the module for the default store, e.g. `projects/my-gsm-project/roles/humanitec_operator_gcpsm_kxqp`, and `roles/secretmanager.secretAccessor` for any other store. Returns `null` for the default store if neither `secret_manager_role` is set nor `secret_manager_access_create` is `true`. |
 | <a name="output_secret_store_id"></a> [secret\_store\_id](#output\_secret\_store\_id) | ID of the secret store, i.e. the name of the Kubernetes `SecretStore` resource. This is either `secret_store_id` or the generated ID. Use it as the `store` in secret references. |
 | <a name="output_secret_store_namespace"></a> [secret\_store\_namespace](#output\_secret\_store\_namespace) | Name of the Kubernetes namespace of the `SecretStore` resource. This is the Operator namespace for a cluster-wide store, or the Environment namespace for an Environment-local store. |
+| <a name="output_secret_store_ready"></a> [secret\_store\_ready](#output\_secret\_store\_ready) | Whether the module manages the `SecretStore` resource. This is `false` if the `SecretStore` CRD was not present on the cluster during planning. In that case, apply the configuration again once the Operator is installed. See [Installation order](#installation-order). |
 | <a name="output_service_account_credentials_secret_name"></a> [service\_account\_credentials\_secret\_name](#output\_service\_account\_credentials\_secret\_name) | Name of the Kubernetes Secret holding the key of the Google service account, located in the `secret_store_namespace`. Returns `null` if `auth_method` is not `service_account_key`. |
 | <a name="output_service_account_email"></a> [service\_account\_email](#output\_service\_account\_email) | Email address of the Google service account used by the Operator. Returns `null` if the Operator does not use a Google service account. |
 | <a name="output_service_account_id"></a> [service\_account\_id](#output\_service\_account\_id) | Fully qualified ID of the Google service account used by the Operator, i.e. `projects/<project>/serviceAccounts/<email>`. Returns `null` if the Operator does not use a Google service account. |

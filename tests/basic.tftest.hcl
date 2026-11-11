@@ -1,5 +1,12 @@
 # Mock all providers so the tests run without access to Google Cloud or a Kubernetes cluster
-mock_provider "kubernetes" {}
+mock_provider "kubernetes" {
+  # The SecretStore CRD is present on the cluster
+  mock_data "kubernetes_resources" {
+    defaults = {
+      objects = [{ metadata = { name = "secretstores.humanitec.io" } }]
+    }
+  }
+}
 mock_provider "random" {
   # The mocked result does not honor the length attribute
   mock_resource "random_string" {
@@ -151,32 +158,32 @@ run "defaults" {
   # Secret store
   assert {
     condition = (
-      kubernetes_manifest.secret_store.manifest.apiVersion == "humanitec.io/v1alpha1" &&
-      kubernetes_manifest.secret_store.manifest.kind == "SecretStore"
+      kubernetes_manifest.secret_store[0].manifest.apiVersion == "humanitec.io/v1alpha1" &&
+      kubernetes_manifest.secret_store[0].manifest.kind == "SecretStore"
     )
     error_message = "Secret store should be a humanitec.io/v1alpha1 SecretStore"
   }
   assert {
     condition = (
-      kubernetes_manifest.secret_store.manifest.metadata.name == "my-gcpsm" &&
-      kubernetes_manifest.secret_store.manifest.metadata.namespace == "humanitec-operator-system"
+      kubernetes_manifest.secret_store[0].manifest.metadata.name == "my-gcpsm" &&
+      kubernetes_manifest.secret_store[0].manifest.metadata.namespace == "humanitec-operator-system"
     )
     error_message = "Secret store should be named secret_store_id and be cluster-wide in the Operator namespace by default"
   }
   assert {
-    condition     = kubernetes_manifest.secret_store.manifest.metadata.labels["app.humanitec.io/default-store"] == "true" && length(kubernetes_manifest.secret_store.manifest.metadata.labels) == 1
+    condition     = kubernetes_manifest.secret_store[0].manifest.metadata.labels["app.humanitec.io/default-store"] == "true" && length(kubernetes_manifest.secret_store[0].manifest.metadata.labels) == 1
     error_message = "Secret store should be labelled as the default store by default"
   }
   assert {
-    condition     = kubernetes_manifest.secret_store.manifest.spec.gcpsm.projectID == "my-gsm-project"
+    condition     = kubernetes_manifest.secret_store[0].manifest.spec.gcpsm.projectID == "my-gsm-project"
     error_message = "Secret store should use the Secret Manager project"
   }
   assert {
-    condition     = !can(kubernetes_manifest.secret_store.manifest.spec.gcpsm.locationID)
+    condition     = !can(kubernetes_manifest.secret_store[0].manifest.spec.gcpsm.locationID)
     error_message = "Secret store should not have a location for the global Secret Manager"
   }
   assert {
-    condition     = kubernetes_manifest.secret_store.manifest.spec.gcpsm.auth == {}
+    condition     = kubernetes_manifest.secret_store[0].manifest.spec.gcpsm.auth == {}
     error_message = "Secret store should have an empty auth object with Workload Identity. A map cannot be converted to the SecretStore CRD schema by kubernetes_manifest"
   }
   assert {
@@ -252,8 +259,8 @@ run "generated_secret_store_id" {
     error_message = "The random suffix of the secret store ID should consist of lowercase letters only"
   }
   assert {
-    condition     = kubernetes_manifest.secret_store.manifest.metadata.name == "gcpsm-abcd"
-    error_message = "Secret store ID should be generated as gcpsm-<random>, got ${kubernetes_manifest.secret_store.manifest.metadata.name}"
+    condition     = kubernetes_manifest.secret_store[0].manifest.metadata.name == "gcpsm-abcd"
+    error_message = "Secret store ID should be generated as gcpsm-<random>, got ${kubernetes_manifest.secret_store[0].manifest.metadata.name}"
   }
   assert {
     condition     = output.secret_store_id == "gcpsm-abcd"
@@ -291,11 +298,11 @@ run "non_default_store" {
   }
 
   assert {
-    condition     = !can(kubernetes_manifest.secret_store.manifest.metadata.labels)
+    condition     = !can(kubernetes_manifest.secret_store[0].manifest.metadata.labels)
     error_message = "Non-default secret store should not be labelled as the default store"
   }
   assert {
-    condition     = kubernetes_manifest.secret_store.manifest.metadata.namespace == "humanitec-operator-system"
+    condition     = kubernetes_manifest.secret_store[0].manifest.metadata.namespace == "humanitec-operator-system"
     error_message = "Non-default secret store should still be cluster-wide by default"
   }
   assert {
@@ -329,11 +336,11 @@ run "environment_local_store" {
   }
 
   assert {
-    condition     = kubernetes_manifest.secret_store.manifest.metadata.namespace == "my-app-development"
+    condition     = kubernetes_manifest.secret_store[0].manifest.metadata.namespace == "my-app-development"
     error_message = "Environment-local secret store should be created in secret_store_namespace"
   }
   assert {
-    condition     = !can(kubernetes_manifest.secret_store.manifest.metadata.labels)
+    condition     = !can(kubernetes_manifest.secret_store[0].manifest.metadata.labels)
     error_message = "Environment-local secret store should not be labelled as the default store"
   }
   assert {
@@ -355,13 +362,13 @@ run "regional_secret_manager" {
 
   assert {
     condition = (
-      kubernetes_manifest.secret_store.manifest.spec.gcpsm.projectID == "my-gsm-project" &&
-      kubernetes_manifest.secret_store.manifest.spec.gcpsm.locationID == "europe-west3"
+      kubernetes_manifest.secret_store[0].manifest.spec.gcpsm.projectID == "my-gsm-project" &&
+      kubernetes_manifest.secret_store[0].manifest.spec.gcpsm.locationID == "europe-west3"
     )
     error_message = "Secret store should use the project and location of the regional Secret Manager"
   }
   assert {
-    condition     = kubernetes_manifest.secret_store.manifest.spec.gcpsm.auth == {}
+    condition     = kubernetes_manifest.secret_store[0].manifest.spec.gcpsm.auth == {}
     error_message = "Secret store should still have an empty auth object with a location"
   }
   assert {
@@ -540,13 +547,13 @@ run "complete_workload_identity_create_service_account" {
   # Secret store
   assert {
     condition = (
-      kubernetes_manifest.secret_store.manifest.metadata.name == "complete-gcpsm" &&
-      kubernetes_manifest.secret_store.manifest.metadata.namespace == "my-operator"
+      kubernetes_manifest.secret_store[0].manifest.metadata.name == "complete-gcpsm" &&
+      kubernetes_manifest.secret_store[0].manifest.metadata.namespace == "my-operator"
     )
     error_message = "Secret store should use secret_store_id and operator_namespace"
   }
   assert {
-    condition     = kubernetes_manifest.secret_store.manifest.spec.gcpsm.auth == {}
+    condition     = kubernetes_manifest.secret_store[0].manifest.spec.gcpsm.auth == {}
     error_message = "Secret store should have an empty auth object with Workload Identity and a Google service account"
   }
 
@@ -664,7 +671,7 @@ run "shared_service_account_without_bindings" {
   }
   assert {
     condition = (
-      kubernetes_manifest.secret_store.manifest.metadata.namespace == "my-app-development" &&
+      kubernetes_manifest.secret_store[0].manifest.metadata.namespace == "my-app-development" &&
       output.operator_iam_member == "serviceAccount:existing-sa@identity-project.iam.gserviceaccount.com"
     )
     error_message = "Secret store should still be created for the existing Google service account"
@@ -715,7 +722,7 @@ run "project_ids_fall_back_to_provider_project" {
 
   assert {
     condition = (
-      kubernetes_manifest.secret_store.manifest.spec.gcpsm.projectID == "my-provider-project" &&
+      kubernetes_manifest.secret_store[0].manifest.spec.gcpsm.projectID == "my-provider-project" &&
       output.secret_manager_project_id == "my-provider-project"
     )
     error_message = "Secret store should use the provider project if secret_manager_project_id is not set"
@@ -766,7 +773,7 @@ run "service_account_key_ignores_provider_project_for_gke" {
     condition = (
       length(data.google_project.gke) == 0 &&
       output.workload_identity_member == null &&
-      kubernetes_manifest.secret_store.manifest.spec.gcpsm.projectID == "my-gsm-project"
+      kubernetes_manifest.secret_store[0].manifest.spec.gcpsm.projectID == "my-gsm-project"
     )
     error_message = "The provider project should not be used as the GKE project with a service account key, and secret_manager_project_id should take precedence over it"
   }
@@ -862,7 +869,7 @@ run "complete_service_account_key_create_service_account" {
 
   # Secret store
   assert {
-    condition = kubernetes_manifest.secret_store.manifest.spec.gcpsm.auth == {
+    condition = kubernetes_manifest.secret_store[0].manifest.spec.gcpsm.auth == {
       secretAccessKeySecretRef = { name = "my-credentials", key = "secret-access-credentials" }
     }
     error_message = "Secret store should reference the key in the credentials Secret, as an object"
@@ -1063,6 +1070,84 @@ run "domain_scoped_gke_project" {
   assert {
     condition     = google_project_iam_member.operator[0].member == "principal://iam.googleapis.com/projects/123456789012/locations/global/workloadIdentityPools/example.com:my-gke-project.svc.id.goog/subject/ns/humanitec-operator-system/sa/humanitec-operator-controller-manager"
     error_message = "IAM role binding should be for the principal in the Workload Identity pool of a domain-scoped project"
+  }
+}
+
+# SecretStore CRD not yet present on the cluster
+
+run "missing_crd" {
+  command = apply
+
+  override_data {
+    target = data.kubernetes_resources.secret_store_crd
+    values = {
+      objects = []
+    }
+  }
+
+  # The check only warns, so the run continues
+  expect_failures = [check.secret_store_crd]
+
+  assert {
+    condition     = length(kubernetes_manifest.secret_store) == 0
+    error_message = "SecretStore should not be created without the CRD"
+  }
+  assert {
+    condition     = output.secret_store_ready == false
+    error_message = "secret_store_ready output should be false without the CRD"
+  }
+  assert {
+    condition     = output.secret_store_id == "my-gcpsm" && output.secret_store_namespace == "humanitec-operator-system"
+    error_message = "Secret store outputs should be set without the CRD"
+  }
+  assert {
+    condition     = length(google_project_iam_custom_role.secret_manager) == 1 && length(google_project_iam_member.operator) == 1
+    error_message = "Google Cloud objects should be created without the CRD"
+  }
+}
+
+run "missing_crd_with_service_account_key" {
+  command = apply
+
+  variables {
+    auth_method    = "service_account_key"
+    gke_project_id = null
+  }
+
+  override_data {
+    target = data.kubernetes_resources.secret_store_crd
+    values = {
+      objects = []
+    }
+  }
+
+  expect_failures = [check.secret_store_crd]
+
+  assert {
+    condition     = length(kubernetes_secret_v1.operator_credentials) == 0
+    error_message = "Credentials Secret should not be created without the CRD, as the namespace may not exist"
+  }
+  assert {
+    condition     = length(google_service_account.operator) == 1 && length(google_service_account_key.operator) == 1
+    error_message = "Google service account and key should be created without the CRD"
+  }
+}
+
+run "crd_being_deleted" {
+  command = apply
+
+  override_data {
+    target = data.kubernetes_resources.secret_store_crd
+    values = {
+      objects = [{ metadata = { name = "secretstores.humanitec.io", deletionTimestamp = "2026-01-01T00:00:00Z" } }]
+    }
+  }
+
+  expect_failures = [check.secret_store_crd]
+
+  assert {
+    condition     = length(kubernetes_manifest.secret_store) == 0
+    error_message = "SecretStore should not be created while the CRD is being deleted"
   }
 }
 
