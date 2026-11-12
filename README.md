@@ -40,7 +40,7 @@ If the Operator is already installed, a single apply is sufficient.
 > [!NOTE]
 > **Architectural decision**
 >
-> A provider such as [alekc/kubectl](https://registry.terraform.io/providers/alekc/kubectl), which does not require the CRD to exist at plan time, would allow a single apply. However, it would introduce another external community provider, require users to configure and pass in a further provider, and require an additional module input to order the SecretStore after the Operator installation. It would also need retry handling, as a newly installed CRD can take a moment before the API server accepts resources of its type. The module therefore checks for the CRD instead and accepts a second apply when the Operator is installed in the same run as the module, e.g. on a new cluster.
+> A provider such as [alekc/kubectl](https://registry.terraform.io/providers/alekc/kubectl), which does not require the CRD to exist at plan time, would allow a single apply. However, it would introduce another external community provider, require users to configure and pass in a third provider, and require an additional module input to order the SecretStore after the Operator installation. It would also need retry handling, as a newly installed CRD can take a moment before the API server accepts resources of its type. The module therefore checks for the CRD instead and accepts a second apply when the Operator is installed in the same run as the module, e.g. on a new cluster.
 
 With the default Workload Identity setup, the Operator needs no further configuration. If the Operator impersonates a Google service account, its service account needs an annotation with the email address of the Google service account. See [Configure the Operator to impersonate the Google service account](#configure-the-operator-to-impersonate-the-google-service-account) for how to provide it.
 
@@ -309,9 +309,9 @@ Then [configure the Operator to impersonate the Google service account](#configu
 
 #### Configure the Operator to impersonate the Google service account
 
-The Operator service account must be annotated with the email address of the Google service account. The module does not modify the Operator installation, so you need to set the annotation via the Helm values of the Operator.
+The Operator service account must be annotated with the email address of the Google service account. The module does not modify the Operator installation, so you need to set the annotation in the Operator installation.
 
-Use the `operator_serviceaccount_annotations` output of the module in the Helm values of the Operator installation. If you install the Operator in the same configuration as the module, the first apply then creates the Google service account before it installs the Operator with the annotation (see [Installation order](#installation-order)).
+If you install the Operator in the same configuration as the module, set the annotation from the `operator_serviceaccount_annotations` output of the module. The first apply then creates the Google service account before it installs the Operator with the annotation (see [Installation order](#installation-order)).
 
 ```hcl
 locals {
@@ -334,13 +334,13 @@ controllerManager:
       iam.gke.io/gcp-service-account: <email address of the Google service account>
 ```
 
+If you install the Operator separately and before the module, set a fixed `service_account_name` so that you know the email address of the Google service account at that point, e.g. `humanitec-operator@my-gke-project.iam.gserviceaccount.com` for the `service_account_name` `humanitec-operator` and the `service_account_project_id` `my-gke-project`. Without it, the module generates an account ID with a random suffix that is only known after the module has run. Once the module has created the Google service account and the IAM role binding allowing the impersonation, the Operator can impersonate it without any further changes. Alternatively, [bring your own Google service account](#bring-your-own-google-service-account).
+
 If you change the annotation of a running Operator, restart the Operator to pick up the Google service account:
 
 ```shell
 kubectl rollout restart deployment -n humanitec-operator-system humanitec-operator-controller-manager
 ```
-
-If you install the Operator separately and before the module, create the Google service account before the Operator and [bring your own Google service account](#bring-your-own-google-service-account), so that you know its email address at that point.
 
 #### Bring your own Google service account
 
