@@ -143,7 +143,7 @@ variable "gke_project_id" {
 # Google service account
 
 variable "service_account_create" {
-  description = "Whether to create a Google service account for the Operator. If not set, the module creates one if `auth_method` is `service_account_key`, and none if `auth_method` is `workload_identity`. With `workload_identity`, the Operator service account impersonates the Google service account if the module creates one or `service_account_email` is set, and uses Workload Identity Federation for GKE directly otherwise. Set it to `false` to use an existing service account passed in via `service_account_email`, and, with `service_account_key`, its key passed in via `service_account_key`. With `workload_identity`, you can omit it if `service_account_email` is a literal value, but set it explicitly to `false` if `service_account_email` is only known after apply, e.g. because it refers to a `google_service_account` in the same configuration: the module can only plan its resources if it knows whether the Operator uses a Google service account."
+  description = "Whether to create a Google service account for the Operator. If not set, it is `true` if `auth_method` is `service_account_key` and `false` if it is `workload_identity`. With `workload_identity`, the Operator impersonates a Google service account if the module creates one or `service_account_email` is set, and uses its Kubernetes service account directly otherwise. Set it to `false` to use an existing service account passed in via `service_account_email`. Always set it explicitly if `service_account_email` is only known after apply, e.g. because it refers to a `google_service_account` in the same configuration."
   type        = bool
   nullable    = true
   default     = null
