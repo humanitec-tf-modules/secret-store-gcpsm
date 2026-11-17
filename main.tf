@@ -244,6 +244,13 @@ resource "google_service_account_key" "operator" {
   count              = local.use_service_account_key && local.service_account_create ? 1 : 0
   service_account_id = google_service_account.operator[0].name
   keepers            = var.service_account_key_keepers
+
+  # On rotation, create the new key and write it to the Kubernetes Secret before deleting the old key,
+  # so that the Secret never holds a revoked key. Terraform applies this to the service account as well,
+  # which is fine: replacing it means a new account ID or project, so old and new account do not collide.
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 # Version of the key in the Kubernetes Secret. Write-only data is not part of the state, so a change
