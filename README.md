@@ -30,12 +30,14 @@ The module creates the `SecretStore` resource using a `kubernetes_manifest`, whi
 
 So that you can install the Operator in the same OpenTofu/Terraform configuration as the module, the module checks for the CRD during planning. If the CRD is missing, the module skips the `SecretStore` and the Kubernetes Secret holding the service account key. It still creates the Google Cloud objects, shows the warning `SecretStore CRD not found`, and returns `false` in the `secret_store_ready` output.
 
-On a new cluster, this takes two consecutive applies without any configuration change in between:
+If you install the Operator in the same run as the module, this takes two consecutive applies without any configuration change in between:
 
 1. The first apply installs the Operator, and with it the CRD, and creates the Google Cloud objects. The warning is expected.
 2. The second apply finds the CRD and creates the `SecretStore`.
 
 If the Operator is already installed, a single apply is sufficient.
+
+The cluster itself must already exist when you plan the module, as the `kubernetes` provider needs to connect to it. If the same configuration also creates the cluster, apply the cluster first, e.g. using `-target`.
 
 > [!NOTE]
 > **Architectural decision**
