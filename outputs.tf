@@ -66,6 +66,8 @@ output "operator_serviceaccount_annotations" {
   value       = local.use_workload_identity_service_account ? tomap({ "iam.gke.io/gcp-service-account" = local.service_account_email }) : tomap({})
 }
 output "service_account_credentials_secret_name" {
-  description = "Name of the Kubernetes Secret holding the key of the Google service account, located in the `secret_store_namespace`. Returns `null` if `auth_method` is not `service_account_key`."
-  value       = one(kubernetes_secret_v1.operator_credentials[*].metadata[0].name)
+  description = "Name of the Kubernetes Secret holding the key of the Google service account, located in the `secret_store_namespace`. Like the `SecretStore`, the module only creates the Secret once the `SecretStore` CRD is present, see `secret_store_ready`. Returns `null` if `auth_method` is not `service_account_key`."
+  value       = local.service_account_credentials_secret_name
+  # Consumers of the name should wait for the Secret, once it can be created
+  depends_on = [kubernetes_secret_v1.operator_credentials]
 }

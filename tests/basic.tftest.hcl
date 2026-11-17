@@ -1128,6 +1128,10 @@ run "missing_crd_with_service_account_key" {
     error_message = "Credentials Secret should not be created without the CRD, as the namespace may not exist"
   }
   assert {
+    condition     = output.service_account_credentials_secret_name == "${output.secret_store_id}-credentials"
+    error_message = "Credentials Secret name output should be set without the CRD"
+  }
+  assert {
     condition     = length(google_service_account.operator) == 1 && length(google_service_account_key.operator) == 1
     error_message = "Google service account and key should be created without the CRD"
   }
