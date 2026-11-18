@@ -188,7 +188,7 @@ run "defaults" {
   }
   assert {
     condition = (
-      terraform_data.secret_store_replacement_triggers.output.auth_method == "workload_identity" &&
+      terraform_data.secret_store_replacement_triggers.output.service_account_key == false &&
       terraform_data.secret_store_replacement_triggers.output.secret_manager_location == null
     )
     error_message = "Auth method and location should be tracked, so that changing them replaces the secret store"
@@ -490,7 +490,7 @@ run "complete_workload_identity_create_service_account" {
     secret_store_id              = "complete-gcpsm"
     operator_namespace           = "my-operator"
     operator_serviceaccount      = "my-operator-sa"
-    service_account_create       = true
+    auth_method                  = "workload_identity_service_account"
     service_account_name         = "my-operator-gsa"
     service_account_display_name = "My Operator"
     service_account_project_id   = "my-identity-project"
@@ -588,7 +588,7 @@ run "workload_identity_create_service_account_defaults" {
   command = apply
 
   variables {
-    service_account_create = true
+    auth_method = "workload_identity_service_account"
   }
 
   assert {
@@ -609,12 +609,14 @@ run "workload_identity_existing_service_account" {
   command = apply
 
   variables {
-    service_account_email = "existing-sa@identity-project.iam.gserviceaccount.com"
+    auth_method            = "workload_identity_service_account"
+    service_account_create = false
+    service_account_email  = "existing-sa@identity-project.iam.gserviceaccount.com"
   }
 
   assert {
     condition     = length(google_service_account.operator) == 0 && length(random_string.service_account_name_suffix) == 0
-    error_message = "No Google service account should be created if service_account_email is set"
+    error_message = "No Google service account should be created if service_account_create is false"
   }
   assert {
     condition     = data.google_service_account.operator[0].account_id == "projects/-/serviceAccounts/existing-sa@identity-project.iam.gserviceaccount.com"
@@ -645,6 +647,39 @@ run "workload_identity_existing_service_account" {
   }
 }
 
+run "workload_identity_ignores_service_account_create" {
+  command = plan
+
+  variables {
+    service_account_create = false
+  }
+
+  assert {
+    condition = (
+      length(google_service_account.operator) == 0 &&
+      length(data.google_service_account.operator) == 0 &&
+      length(data.google_project.gke) == 1
+    )
+    error_message = "service_account_create should be ignored with auth_method workload_identity, which uses no Google service account"
+  }
+}
+
+run "workload_identity_methods_share_secret_store" {
+  command = apply
+
+  variables {
+    auth_method = "workload_identity_service_account"
+  }
+
+  assert {
+    condition = (
+      kubernetes_manifest.secret_store[0].manifest.spec.gcpsm.auth == {} &&
+      terraform_data.secret_store_replacement_triggers.output.service_account_key == false
+    )
+    error_message = "Secret store should have the same empty auth object and replacement triggers as with auth_method workload_identity, so that switching between them does not replace it"
+  }
+}
+
 # Several secret stores sharing one existing Google service account.
 # The Workload Identity binding and the Secret Manager access are managed outside of the module.
 
@@ -656,6 +691,8 @@ run "shared_service_account_without_bindings" {
     secret_store_cluster_wide        = false
     secret_store_namespace           = "my-app-development"
     gke_project_id                   = null
+    auth_method                      = "workload_identity_service_account"
+    service_account_create           = false
     service_account_email            = "existing-sa@identity-project.iam.gserviceaccount.com"
     workload_identity_binding_create = false
     secret_manager_access_create     = false
@@ -692,6 +729,8 @@ run "shared_service_account_without_bindings_or_any_gke_project" {
   variables {
     secret_store_default             = false
     gke_project_id                   = null
+    auth_method                      = "workload_identity_service_account"
+    service_account_create           = false
     service_account_email            = "existing-sa@identity-project.iam.gserviceaccount.com"
     workload_identity_binding_create = false
     secret_manager_access_create     = false
@@ -748,7 +787,7 @@ run "service_account_project_falls_back_to_provider_project" {
 
   variables {
     secret_manager_project_id = null
-    service_account_create    = true
+    auth_method               = "workload_identity_service_account"
   }
 
   assert {
@@ -784,7 +823,7 @@ run "create_service_account_without_workload_identity_binding" {
 
   # gke_project_id is still set from the file-level variables
   variables {
-    service_account_create           = true
+    auth_method                      = "workload_identity_service_account"
     workload_identity_binding_create = false
   }
 
@@ -875,7 +914,7 @@ run "complete_service_account_key_create_service_account" {
     error_message = "Secret store should reference the key in the credentials Secret, as an object"
   }
   assert {
-    condition     = terraform_data.secret_store_replacement_triggers.output.auth_method == "service_account_key"
+    condition     = terraform_data.secret_store_replacement_triggers.output.service_account_key == true
     error_message = "Auth method should be tracked, so that changing it replaces the secret store"
   }
 
@@ -1014,8 +1053,8 @@ run "generated_service_account_name_is_truncated" {
   command = apply
 
   variables {
-    secret_store_id        = "my-very-long-secret-store-id"
-    service_account_create = true
+    secret_store_id = "my-very-long-secret-store-id"
+    auth_method     = "workload_identity_service_account"
   }
 
   assert {
@@ -1032,8 +1071,8 @@ run "generated_service_account_name_trims_hyphens" {
   command = apply
 
   variables {
-    secret_store_id        = "abcdefghijklm--secret-store"
-    service_account_create = true
+    secret_store_id = "abcdefghijklm--secret-store"
+    auth_method     = "workload_identity_service_account"
   }
 
   assert {
@@ -1272,10 +1311,11 @@ run "custom_role_requires_default_store" {
   expect_failures = [var.secret_manager_role_create]
 }
 
-run "existing_service_account_requires_email_with_workload_identity" {
+run "existing_service_account_requires_email_with_workload_identity_service_account" {
   command = plan
 
   variables {
+    auth_method            = "workload_identity_service_account"
     service_account_create = false
   }
 
@@ -1320,8 +1360,10 @@ run "workload_identity_binding_requires_gke_project_id_without_provider_project"
   command = plan
 
   variables {
-    gke_project_id        = null
-    service_account_email = "existing-sa@identity-project.iam.gserviceaccount.com"
+    gke_project_id         = null
+    auth_method            = "workload_identity_service_account"
+    service_account_create = false
+    service_account_email  = "existing-sa@identity-project.iam.gserviceaccount.com"
   }
 
   override_data {
@@ -1359,8 +1401,8 @@ run "create_service_account_rejects_service_account_email" {
   command = plan
 
   variables {
-    service_account_create = true
-    service_account_email  = "existing-sa@identity-project.iam.gserviceaccount.com"
+    auth_method           = "workload_identity_service_account"
+    service_account_email = "existing-sa@identity-project.iam.gserviceaccount.com"
   }
 
   expect_failures = [var.service_account_email]
@@ -1378,11 +1420,23 @@ run "service_account_key_creates_service_account_by_default_and_rejects_service_
   expect_failures = [var.service_account_email]
 }
 
+run "workload_identity_rejects_service_account_email" {
+  command = plan
+
+  variables {
+    service_account_email = "existing-sa@identity-project.iam.gserviceaccount.com"
+  }
+
+  expect_failures = [var.service_account_email]
+}
+
 run "rejects_invalid_service_account_email" {
   command = plan
 
   variables {
-    service_account_email = "existing-sa"
+    auth_method            = "workload_identity_service_account"
+    service_account_create = false
+    service_account_email  = "existing-sa"
   }
 
   expect_failures = [var.service_account_email]
@@ -1392,8 +1446,8 @@ run "rejects_invalid_service_account_name" {
   command = plan
 
   variables {
-    service_account_create = true
-    service_account_name   = "gsa"
+    auth_method          = "workload_identity_service_account"
+    service_account_name = "gsa"
   }
 
   expect_failures = [var.service_account_name]
@@ -1403,7 +1457,7 @@ run "rejects_too_long_service_account_display_name" {
   command = plan
 
   variables {
-    service_account_create       = true
+    auth_method                  = "workload_identity_service_account"
     service_account_display_name = "Humanitec Operator access to the Google Cloud Secret Manager secret store my-gcpsm in the project my-gsm-project"
   }
 
@@ -1430,6 +1484,8 @@ run "existing_service_account_rejects_service_account_settings" {
   command = plan
 
   variables {
+    auth_method                  = "workload_identity_service_account"
+    service_account_create       = false
     service_account_email        = "existing-sa@identity-project.iam.gserviceaccount.com"
     service_account_name         = "my-operator-gsa"
     service_account_display_name = "My Operator"
@@ -1447,7 +1503,7 @@ run "workload_identity_rejects_service_account_key_settings" {
   command = plan
 
   variables {
-    service_account_create                  = true
+    auth_method                             = "workload_identity_service_account"
     service_account_key_keepers             = { rotation = "2027-01-01" }
     service_account_key                     = "{\"type\":\"service_account\",\"private_key\":\"existing-private-key\"}"
     service_account_key_version             = 2

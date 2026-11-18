@@ -36,32 +36,24 @@ data "google_client_config" "current" {
     }
     postcondition {
       condition     = !local.gke_project_id_required || var.gke_project_id != null || try(coalesce(self.project), null) != null
-      error_message = "gke_project_id must be set if auth_method is workload_identity and no project is configured in the google provider, unless the Operator impersonates a Google service account and workload_identity_binding_create is false"
+      error_message = "gke_project_id must be set if auth_method is workload_identity, or workload_identity_service_account with workload_identity_binding_create, and no project is configured in the google provider"
     }
   }
 }
 
 locals {
-  use_workload_identity   = var.auth_method == "workload_identity"
-  use_service_account_key = var.auth_method == "service_account_key"
-
-  # Create a Google service account if requested, and by default only if the Operator uses its key
-  service_account_create = coalesce(var.service_account_create, local.use_service_account_key)
-  # Whether the Operator uses a Google service account passed in. Resource counts depend on it, so it must be known
-  # during plan even if service_account_email is not, e.g. because the service account is created in the same
-  # configuration: service_account_create = false decides it. Only if service_account_create is not set and the
-  # Operator uses Workload Identity, it is inferred from whether service_account_email is set.
-  use_existing_service_account = (
-    var.service_account_create != null ? !var.service_account_create
-    : !local.use_workload_identity ? false
-    : var.service_account_email != null
-  )
-  # Whether the Operator uses a Google service account, either created by the module or passed in
-  use_service_account = local.service_account_create || local.use_existing_service_account
   # With Workload Identity, the Operator service account either accesses Secret Manager itself, as the principal
   # of Workload Identity Federation for GKE, or impersonates a Google service account
-  use_workload_identity_federation      = local.use_workload_identity && !local.use_service_account
-  use_workload_identity_service_account = local.use_workload_identity && local.use_service_account
+  use_workload_identity_federation      = var.auth_method == "workload_identity"
+  use_workload_identity_service_account = var.auth_method == "workload_identity_service_account"
+  use_workload_identity                 = local.use_workload_identity_federation || local.use_workload_identity_service_account
+  use_service_account_key               = var.auth_method == "service_account_key"
+
+  # Whether the Operator uses a Google service account, either created by the module or passed in.
+  # Resource counts depend on these, so they only depend on variables that are known during plan.
+  use_service_account          = local.use_workload_identity_service_account || local.use_service_account_key
+  service_account_create       = local.use_service_account && var.service_account_create
+  use_existing_service_account = local.use_service_account && !var.service_account_create
 
   # ID of the secret store: the ID passed in, or the generated ID
   secret_store_id = var.secret_store_id != null ? var.secret_store_id : "gcpsm-${random_string.secret_store_id_suffix[0].result}"
@@ -136,7 +128,7 @@ locals {
   # The GKE project is only used with Workload Identity, so it only falls back to the provider project then.
   # It is required unless the Operator impersonates a Google service account whose Workload Identity binding is
   # managed outside of the module: then it only serves the workload_identity_member output.
-  gke_project_id_required = local.use_workload_identity && (!local.use_service_account || var.workload_identity_binding_create)
+  gke_project_id_required = local.use_workload_identity_federation || (local.use_workload_identity_service_account && var.workload_identity_binding_create)
   gke_project_id          = local.use_workload_identity ? try(coalesce(var.gke_project_id, local.provider_project_id), null) : null
 
   # Workload Identity pool of the GKE cluster, and the Operator service account in it.
@@ -178,7 +170,8 @@ locals {
   )
   # Authentication of the secret store, depending on the auth method.
   # With a service account key, the store references the key in the credentials Secret.
-  # With Workload Identity, the Operator uses the identity of its service account, which requires an empty auth.
+  # With Workload Identity, the Operator uses the identity of its service account, which requires an empty auth,
+  # whether it accesses Secret Manager itself or impersonates a Google service account.
   # Select the value by key instead of using a conditional: a conditional would convert both values into a map,
   # and kubernetes_manifest cannot convert an empty map into the auth object of the SecretStore CRD.
   secret_store_auth = {
@@ -188,7 +181,8 @@ locals {
         key  = "secret-access-credentials"
       }
     }
-    workload_identity = {}
+    workload_identity                 = {}
+    workload_identity_service_account = {}
   }[var.auth_method]
   # The location is omitted for the global Secret Manager
   secret_store_spec = merge(
@@ -204,7 +198,7 @@ locals {
   project_id_pattern = "^([a-z0-9.-]+:)?[a-z][-a-z0-9]{4,28}[a-z0-9]$"
 }
 
-# Workload Identity Federation for GKE (auth_method = "workload_identity" without a Google service account)
+# Workload Identity Federation for GKE (auth_method = "workload_identity")
 
 # Project of the GKE cluster, for the project number in the principal of the Operator service account
 data "google_project" "gke" {
@@ -213,7 +207,7 @@ data "google_project" "gke" {
 }
 
 # Google service account for the Operator
-# (auth_method = "service_account_key", or "workload_identity" with a Google service account)
+# (auth_method = "workload_identity_service_account" or "service_account_key")
 
 resource "google_service_account" "operator" {
   count        = local.service_account_create ? 1 : 0
@@ -306,10 +300,12 @@ resource "google_project_iam_member" "operator" {
 
 # Secret store registration with the Operator
 
-# Tracks the auth method and the location, so that changing them replaces the secret store
+# Tracks whether the secret store references a service account key, and the location, so that changing them
+# replaces the secret store. Both Workload Identity methods have the same empty auth object, so switching
+# between them leaves the secret store in place.
 resource "terraform_data" "secret_store_replacement_triggers" {
   input = {
-    auth_method             = var.auth_method
+    service_account_key     = local.use_service_account_key
     secret_manager_location = var.secret_manager_location
   }
 }
@@ -357,7 +353,7 @@ resource "kubernetes_manifest" "secret_store" {
   lifecycle {
     # kubernetes_manifest cannot update the auth object from the Secret reference of a service account key
     # to the empty object of Workload Identity, or remove the location: it sends null, which the Kubernetes
-    # API server rejects. Recreate the secret store whenever the auth method or the location changes instead.
+    # API server rejects. Recreate the secret store whenever the auth object or the location changes instead.
     replace_triggered_by = [terraform_data.secret_store_replacement_triggers]
   }
 }

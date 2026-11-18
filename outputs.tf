@@ -38,23 +38,23 @@ output "secret_manager_iam_member_id" {
   value       = one(google_project_iam_member.operator[*].id)
 }
 output "operator_iam_member" {
-  description = "IAM member of the identity the Operator uses, e.g. to grant it access to further Google Cloud resources. This is `serviceAccount:<email>` if the Operator uses a Google service account, or the `principal://` identifier of the Operator service account if it uses Workload Identity Federation for GKE directly."
+  description = "IAM member of the identity the Operator uses, e.g. to grant it access to further Google Cloud resources. This is the `principal://` identifier of the Operator service account if `auth_method` is `workload_identity`, and `serviceAccount:<email>` of the Google service account otherwise."
   value       = local.operator_iam_member
 }
 output "service_account_email" {
-  description = "Email address of the Google service account used by the Operator. Returns `null` if the Operator does not use a Google service account."
+  description = "Email address of the Google service account used by the Operator. Returns `null` if `auth_method` is `workload_identity`, which uses no Google service account."
   value       = local.service_account_email
 }
 output "service_account_id" {
-  description = "Fully qualified ID of the Google service account used by the Operator, i.e. `projects/<project>/serviceAccounts/<email>`. Returns `null` if the Operator does not use a Google service account."
+  description = "Fully qualified ID of the Google service account used by the Operator, i.e. `projects/<project>/serviceAccounts/<email>`. Returns `null` if `auth_method` is `workload_identity`, which uses no Google service account."
   value       = local.service_account_id
 }
 output "service_account_unique_id" {
-  description = "Unique numeric ID of the Google service account used by the Operator. Returns `null` if the Operator does not use a Google service account."
+  description = "Unique numeric ID of the Google service account used by the Operator. Returns `null` if `auth_method` is `workload_identity`, which uses no Google service account."
   value       = local.service_account_unique_id
 }
 output "workload_identity_member" {
-  description = "IAM member of the Operator service account in the Workload Identity pool of the GKE cluster, i.e. `serviceAccount:<gke_project_id>.svc.id.goog[<operator_namespace>/<operator_serviceaccount>]`, with `gke_project_id` falling back to the project configured in the `google` provider. If `workload_identity_binding_create` is `false`, grant it the role `roles/iam.workloadIdentityUser` on the Google service account yourself. Returns `null` if `auth_method` is not `workload_identity`, the Operator does not impersonate a Google service account, or neither `gke_project_id` nor a provider project is set."
+  description = "IAM member of the Operator service account in the Workload Identity pool of the GKE cluster, i.e. `serviceAccount:<gke_project_id>.svc.id.goog[<operator_namespace>/<operator_serviceaccount>]`, with `gke_project_id` falling back to the project configured in the `google` provider. If `workload_identity_binding_create` is `false`, grant it the role `roles/iam.workloadIdentityUser` on the Google service account yourself. Returns `null` if `auth_method` is not `workload_identity_service_account`, or neither `gke_project_id` nor a provider project is set."
   value       = local.workload_identity_member
 }
 output "workload_identity_binding_id" {
@@ -62,7 +62,7 @@ output "workload_identity_binding_id" {
   value       = one(google_service_account_iam_member.workload_identity[*].id)
 }
 output "operator_serviceaccount_annotations" {
-  description = "Annotations to set on the Operator service account so that it impersonates the Google service account via Workload Identity, e.g. via the `controllerManager.serviceAccount.annotations` value of the Operator Helm chart. Restart the Operator after changing them. Returns an empty map if `auth_method` is not `workload_identity` or the Operator does not impersonate a Google service account."
+  description = "Annotations to set on the Operator service account so that it impersonates the Google service account via Workload Identity, e.g. via the `controllerManager.serviceAccount.annotations` value of the Operator Helm chart. Restart the Operator after changing them. Returns an empty map if `auth_method` is not `workload_identity_service_account`."
   value       = local.use_workload_identity_service_account ? tomap({ "iam.gke.io/gcp-service-account" = local.service_account_email }) : tomap({})
 }
 output "service_account_credentials_secret_name" {

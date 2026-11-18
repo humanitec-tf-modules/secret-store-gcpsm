@@ -49,6 +49,7 @@ module "workload_identity_with_existing_service_account" {
   secret_store_default      = false
   secret_manager_project_id = "my-gsm-project"
   gke_project_id            = "my-gke-project"
+  auth_method               = "workload_identity_service_account"
   service_account_create    = false
   service_account_email     = google_service_account.operator.email
 }

@@ -107,24 +107,24 @@ variable "operator_namespace" {
   default     = "humanitec-operator-system"
 }
 variable "operator_serviceaccount" {
-  description = "Name of the Kubernetes service account of the Humanitec Operator. Used to identify the Operator via Workload Identity Federation for GKE if `auth_method` is `workload_identity`."
+  description = "Name of the Kubernetes service account of the Humanitec Operator. Used to identify the Operator via Workload Identity Federation for GKE if `auth_method` is `workload_identity` or `workload_identity_service_account`."
   type        = string
   nullable    = false
   default     = "humanitec-operator-controller-manager"
 }
 variable "auth_method" {
-  description = "How the Operator authenticates against Google Cloud Secret Manager. `workload_identity` (recommended): the Operator uses its Kubernetes service account via Workload Identity Federation for GKE, either directly or by impersonating a Google service account. `service_account_key`: the Operator uses a key of a Google service account, stored in a Kubernetes Secret."
+  description = "How the Operator authenticates against Google Cloud Secret Manager. `workload_identity` (recommended): the Operator uses its Kubernetes service account directly via Workload Identity Federation for GKE, so no Google service account is involved. `workload_identity_service_account`: the Operator uses its Kubernetes service account via Workload Identity Federation for GKE to impersonate a Google service account, which the module creates or you pass in. `service_account_key`: the Operator uses a key of a Google service account, which the module creates or you pass in, stored in a Kubernetes Secret."
   type        = string
   nullable    = false
   default     = "workload_identity"
 
   validation {
-    condition     = contains(["workload_identity", "service_account_key"], var.auth_method)
-    error_message = "auth_method must be one of: workload_identity, service_account_key"
+    condition     = contains(["workload_identity", "workload_identity_service_account", "service_account_key"], var.auth_method)
+    error_message = "auth_method must be one of: workload_identity, workload_identity_service_account, service_account_key"
   }
 }
 variable "gke_project_id" {
-  description = "ID of the Google Cloud project of the GKE cluster hosting the Operator. Its Workload Identity pool `<gke_project_id>.svc.id.goog` identifies the Operator service account. The cluster and the node pool running the Operator must have Workload Identity Federation for GKE enabled. If not set and `auth_method` is `workload_identity`, the project configured in the `google` provider is used. Required if `auth_method` is `workload_identity` and the provider has no project configured, unless the Operator impersonates a Google service account and `workload_identity_binding_create` is `false`. Must not be set if `auth_method` is `service_account_key`."
+  description = "ID of the Google Cloud project of the GKE cluster hosting the Operator. Its Workload Identity pool `<gke_project_id>.svc.id.goog` identifies the Operator service account. The cluster and the node pool running the Operator must have Workload Identity Federation for GKE enabled. If not set and `auth_method` is `workload_identity` or `workload_identity_service_account`, the project configured in the `google` provider is used. Required if the provider has no project configured and `auth_method` is `workload_identity`, or `workload_identity_service_account` with `workload_identity_binding_create` being `true`. Must not be set if `auth_method` is `service_account_key`."
   type        = string
   nullable    = true
   default     = null
@@ -143,10 +143,10 @@ variable "gke_project_id" {
 # Google service account
 
 variable "service_account_create" {
-  description = "Whether to create a Google service account for the Operator. If not set, it is `true` if `auth_method` is `service_account_key` and `false` if it is `workload_identity`. With `workload_identity`, the Operator impersonates a Google service account if the module creates one or `service_account_email` is set, and uses its Kubernetes service account directly otherwise. Set it to `false` to use an existing service account passed in via `service_account_email`. Always set it explicitly if `service_account_email` is only known after apply, e.g. because it refers to a `google_service_account` in the same configuration."
+  description = "Whether the module creates the Google service account used by the Operator. Set it to `false` to pass in an existing service account via `service_account_email` instead. Only used if `auth_method` is `workload_identity_service_account` or `service_account_key`, as `workload_identity` needs no Google service account."
   type        = bool
-  nullable    = true
-  default     = null
+  nullable    = false
+  default     = true
 }
 variable "service_account_name" {
   description = "Account ID of the Google service account to create for the Operator, i.e. the part of its email address before the `@`. Must be 6 to 30 characters long. Only used if the module creates the service account. If not set, the module generates an account ID from the secret store ID and a random four-letter suffix."
@@ -197,13 +197,13 @@ variable "service_account_project_id" {
   }
 }
 variable "service_account_email" {
-  description = "Email address of an existing Google service account to be used by the Operator, e.g. `humanitec-operator@my-project.iam.gserviceaccount.com`. Required if `service_account_create` is `false`. With `workload_identity`, the Operator service account impersonates this service account. Must not be set if the module creates the service account."
+  description = "Email address of an existing Google service account to be used by the Operator, e.g. `humanitec-operator@my-project.iam.gserviceaccount.com`. Required if `auth_method` is `workload_identity_service_account` or `service_account_key` and `service_account_create` is `false`, must not be set otherwise."
   type        = string
   nullable    = true
   default     = null
 
   validation {
-    condition     = var.service_account_create != false || var.service_account_email != null
+    condition     = !local.use_existing_service_account || var.service_account_email != null
     error_message = "service_account_email must be set if service_account_create is false"
   }
 
@@ -213,12 +213,17 @@ variable "service_account_email" {
   }
 
   validation {
+    condition     = local.use_service_account || var.service_account_email == null
+    error_message = "service_account_email must not be set if auth_method is workload_identity, as it uses no Google service account. Use auth_method workload_identity_service_account to impersonate a Google service account"
+  }
+
+  validation {
     condition     = var.service_account_email == null || can(regex("^[^@\\s]+@[^@\\s]+\\.gserviceaccount\\.com$", var.service_account_email))
     error_message = "service_account_email must be the email address of a Google service account, e.g. humanitec-operator@my-project.iam.gserviceaccount.com"
   }
 }
 variable "workload_identity_binding_create" {
-  description = "Whether to allow the Operator service account to impersonate the Google service account, by granting it the role `roles/iam.workloadIdentityUser` on the service account. Only used if `auth_method` is `workload_identity` and the Operator impersonates a Google service account. Set it to `false` if the binding already exists, e.g. because another instance of the module manages it for the same Google service account. Use the `workload_identity_member` output to create it yourself."
+  description = "Whether to allow the Operator service account to impersonate the Google service account, by granting it the role `roles/iam.workloadIdentityUser` on the service account. Only used if `auth_method` is `workload_identity_service_account`. Set it to `false` if the binding already exists, e.g. because another instance of the module manages it for the same Google service account. Use the `workload_identity_member` output to create it yourself."
   type        = bool
   nullable    = false
   default     = true
